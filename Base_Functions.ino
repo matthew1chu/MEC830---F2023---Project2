@@ -1,5 +1,4 @@
-//MEC830 F2023 Project 1
-// Matthew Chu (500948484) 
+//MEC830 F2023 Project 2
 
 #include <PID_v1.h> // PID Control Library
 #include "SR04.h" // Ultrasonic Distance Sensor Control Library
