@@ -58,7 +58,7 @@ void loop() {
   digitalWrite(motor_toggle, LOW);
   delay(2000);
 
-  //spin CCW
+  //spin CW
   digitalWrite(motor_toggle, HIGH);
   digitalWrite(motor_directiona, LOW);
   digitalWrite(motor_directionb, HIGH);
