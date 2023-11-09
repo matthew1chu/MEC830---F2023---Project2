@@ -15,7 +15,7 @@
 
 Servo myservo;
 
-// create right and left ultrasonic sensor objects
+// create ultrasonic sensor object
 SR04 sr04 = SR04(echo,trig);
 double distance;
 int i=0;
