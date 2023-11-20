@@ -31,9 +31,9 @@ void spinCCW() {
   digitalWrite(STBY, HIGH);
   digitalWrite(AIN, HIGH);
   digitalWrite(B_IN, LOW);
-  analogWrite(PWMA, 50);
-  analogWrite(PWMB, 50);
-  delay(1200);
+  analogWrite(PWMA, 100);
+  analogWrite(PWMB, 100);
+  delay(580);
   digitalWrite(STBY, LOW);
 }
 
@@ -42,9 +42,9 @@ void spinCW() {
   digitalWrite(STBY, HIGH);
   digitalWrite(AIN, LOW);
   digitalWrite(B_IN, HIGH);
-  analogWrite(PWMA, 50);
-  analogWrite(PWMB, 50);
-  delay(1320);
+  analogWrite(PWMA, 100);
+  analogWrite(PWMB, 100);
+  delay(580);
   digitalWrite(STBY , LOW);
 }
 
@@ -53,9 +53,9 @@ void moveForward() {
   digitalWrite(STBY, HIGH);
   digitalWrite(AIN, HIGH);
   digitalWrite(B_IN, HIGH);
-  analogWrite(PWMA, 103);
-  analogWrite(PWMB, 110);
-  delay(3800);
+  analogWrite(PWMA, 200);
+  analogWrite(PWMB, 190);
+  delay(2200);
   digitalWrite(STBY, LOW);
 }
 
