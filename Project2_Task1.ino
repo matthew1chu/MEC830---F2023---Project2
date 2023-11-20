@@ -1,17 +1,12 @@
-//www.elegoo.com
-//2023.05.06
-
-#include "Stepper.h"
 #include "IRremote.h"
-
 #define PWMA 5
 #define PWMB 6
 #define AIN 7
 #define B_IN 8
 #define STBY 3
-;
 
-int receiver = 9; // Signal Pin of IR receiver to Arduino Digital Pin 12
+
+int receiver = 9;
 
 
 IRrecv irrecv(receiver);    // create instance of 'irrecv'
