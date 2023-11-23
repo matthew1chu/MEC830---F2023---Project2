@@ -1,49 +1,73 @@
+#include <IRremote.h>
 #include <Wire.h>
-#include <MPU6050.h>
-#include <PID_v1.h>
 
-MPU6050 mpu;
+//IR RECEIVER
+int RECV_PIN = 9;
+IRrecv irrecv(RECV_PIN);
+decode_results results;
 
-const int PWMA = 5;
-const int PWMB = 6;
-const int AIN = 7;
-const int B_IN = 8;
+//Control Pings for Motors
+const int PWMA = 5;  //RIGHT SPEED
+const int PWMB = 6;  //LEFT SPEED
+const int AIN = 7;   //RIGHT DIRECTION
+const int B_IN = 8;  //LEFT DIRECTION
 const int STBY = 3;
-// Define PID parameters
-double kp = 2;
-double ki = 1;
-double kd = 1;
-double error, integral, lastError, output;
-double setpoint = 1010;  // Use the observed bias as the initial setpoint
 
-// Create PID instance
-PID pid(&error, &output, &setpoint, kp, ki, kd, DIRECT);
+//Timings and MPU6050
+const int MPU = 0x68;                                            // MPU6050 I2C address
+float AccX, AccY, AccZ;                                          //linear acceleration
+float GyroX, GyroY, GyroZ;                                       //angular velocity
+float accAngleX, accAngleY, gyroAngleX, gyroAngleY, gyroAngleZ;  //used in void loop()
+float roll, pitch, yaw;
+float AccErrorX, AccErrorY, GyroErrorX, GyroErrorY, GyroErrorZ;
+float elapsedTime, currentTime, previousTime;
+int c = 0;
 
-// Time variables
-unsigned long startTime;
-unsigned long elapsedTime;
-const unsigned long moveDuration = 2400;  // Move forward for 2400 milliseconds
-const unsigned int numIterations = 3;  // Number of move-spin iterations
-unsigned int iterationCount = 0;
-bool isMovingForward = true;  // State flag to indicate forward movement
+//MOTOR VALUES
+const int maxSpeed = 125;  //max PWM value written to motor speed pin.
+const int minSpeed = 60;   //min PWM value
+float angle;               //due to how I orientated my MPU6050 on my car, angle = roll
+float targetAngle = 0;
+int equilibriumSpeed = 118;  //rough estimate desired PWM to motor
+int leftSpeedVal;
+int rightSpeedVal;
+bool isDriving = true;       //it the car driving forward OR rotate/stationary
+bool prevIsDriving = false;  //equals isDriving in the previous iteration of void loop()
+bool paused = false;         //is the program paused
+
+bool iD = false;  // Set to false when cart is not currently moving
+unsigned long motion;
+unsigned long readValue;
+bool startCheck = false;
+
+//For Iterative Hardcoded Process
+int numInt = 4, iterCount = 0;
+bool pastIter;
+bool checkDistance = false;
+bool STOP = false;
+
+//Ultrasonic Setup
+const int trigPin = 13;
+const int echoPin = 12;
+long duration;
+int distance;
+
+//PID Gains;
+int kp = 2;
 
 void setup() {
-  Wire.begin();
-  Serial.begin(9600);
+  //MPU6050 Setup
 
-  // Initialize MPU6050
-  mpu.initialize();
-  mpu.setFullScaleGyroRange(0);  // Adjust the gyro scale if needed
-  mpu.setFullScaleAccelRange(0);
 
-  calibrateMPU6050();
-
-  // Set the initial setpoint for the PID controller
-  pid.SetMode(AUTOMATIC);
-  pid.SetOutputLimits(-255, 255);  // Adjust based on your motor driver specifications
-  pid.SetSampleTime(1);
-
-  Serial.println("MPU6050 initialized");
+  Wire.begin();                 // Initialize comunication
+  Wire.beginTransmission(MPU);  // Start communication with MPU6050 // MPU=0x68
+  Wire.write(0x6B);             // Talk to the register 6B
+  Wire.write(0x00);             // Make reset - place a 0 into the 6B register
+  Wire.endTransmission(true);   //end the transmission
+  // Call this function if you need to get the IMU error values for your module
+  calculateError();
+  delay(20);
+  //MOTOR PIN SETUP
   pinMode(PWMA, OUTPUT);
   pinMode(PWMB, OUTPUT);
   pinMode(AIN, OUTPUT);
@@ -51,127 +75,338 @@ void setup() {
   pinMode(STBY, OUTPUT);
   digitalWrite(STBY, HIGH);
 
-  // Record the start time
-  startTime = millis();
+  //Ultrasonic Pin Setup
+  pinMode(trigPin, OUTPUT);  // Sets the trigPin as an Output
+  pinMode(echoPin, INPUT);   // Sets the echoPin as an Input
+
+  Serial.begin(9600);
+  currentTime = micros();  //Intialize Timing
 }
 
 void loop() {
-  // Get the elapsed time
-  elapsedTime = millis() - startTime;
 
-  if (iterationCount < numIterations) {
-    if (isMovingForward) {
-      // Move forward using PID control
-      moveForward();
 
-      // Check if the move duration has elapsed
-      if (elapsedTime >= moveDuration) {
-        // Stop the car by disabling the motor driver
-        digitalWrite(STBY, LOW);
-        isMovingForward = !isMovingForward;  // Toggle the state for the next iteration
-        startTime = millis();  // Reset the start time for the next action
-        // Increment the iteration count after going forward
-        iterationCount++;
-      }
-    } else {
-      // Spin clockwise or counterclockwise based on the iteration count
-      if (iterationCount % 2 == 0) {
-        spinClockwise();
-      } else {
-        spinCounterclockwise();
-      }
+  angle = getAngle();
 
- 
+  if (checkDistance) {
+    checkDistance = false;
+    isDriving = false;
+    pastIter = false;
+    iterCount++;
+  }
 
-      // Set the state back to forward movement for the next iteration
-      isMovingForward = true;
-      startTime = millis();  // Reset the start time for the next action
+  //BELOW IS THE SEQUENCE OF THE BOT
+  if (!pastIter) {
+    if (iterCount == 0) {
+      motion = 4;
+      Serial.print("iterCount: ");
+      Serial.println(iterCount);
     }
-  } else {
-    // End the loop after the specified number of iterations
-    digitalWrite(STBY, LOW);  // Disable the motors
-    while (true) {
-      // Do nothing or add any additional logic if needed
+    if (iterCount == 1) {
+      motion = 1;
+      pastIter = true;
+      Serial.print("iterCount: ");
+      Serial.print(iterCount);
+    }
+    if (iterCount == 2) {
+      motion = 3;
+      pastIter = true;
+    }
+    if (iterCount == 3) {
+      motion = 1;
+      pastIter = true;
+    }
+    if (iterCount == 4) {
+      motion = 2;
+      pastIter = true;
+    }
+    if (iterCount == 5) {
+      motion = 1;
+      pastIter = true;
+    }
+    if (iterCount == 6) {
+      motion = 4;
+      stopCar();
+      pastIter = true;
+      STOP = true;
+    }
+    switch (motion) {
+      case 1:
+        Serial.println("forward");
+        isDriving = true;
+        delay(100);
+        break;
+      case 2:
+        Serial.println("left");
+        targetAngle += 90;
+        isDriving = false;
+        delay(400);
+        break;
+      case 3:
+        Serial.println("right");
+        targetAngle -= 90;
+        isDriving = false;
+        delay(400);
+        break;
+      case 4:
+        Serial.println("stop");
+        isDriving = false;
+        iterCount++;
+        delay(1000);
+        break;
+    }
+  }
+  while (STOP) {
+    stopCar();
+  }
+
+  //DRIVE STRAIGHT, STOP, OR ROTATE BASED ON SWITCH CASE STATED
+  static int count;
+  static int countStraight;
+  if (count < 6) {
+    count++;
+  } else {  //runs once after void loop() runs 7 times. void loop runs about every 2.8ms, so this else condition runs every 19.6ms or 50 times/second
+    count = 0;
+    if (!paused) {
+      if (isDriving != prevIsDriving) {
+        leftSpeedVal = equilibriumSpeed;
+        countStraight = 0;
+        Serial.print("mode changed, isDriving: ");
+        Serial.println(isDriving);
+      }
+      if (isDriving) {
+        if (abs(targetAngle - angle) < 3) {
+          if (countStraight < 20) {
+            countStraight++;
+          } else {
+            countStraight = 0;
+            equilibriumSpeed = leftSpeedVal;  //to find equilibrium speed, 20 consecutive readings need to indicate car is going straight
+            Serial.print("EQUILIBRIUM reached, equilibriumSpeed: ");
+            Serial.println(equilibriumSpeed);
+          }
+        } else {
+          countStraight = 0;
+        }
+        iD = driving(iD);
+        digitalWrite(trigPin, LOW);
+        delayMicroseconds(2);
+        digitalWrite(trigPin, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(trigPin, LOW);
+        duration = pulseIn(echoPin, HIGH);
+        distance = duration * 0.034 / 2;
+        Serial.print("Distance: ");
+        Serial.println(distance);
+        if (distance < 30) {
+          checkDistance = true;
+        }
+      } else {
+        rotate();
+      }
+      prevIsDriving = isDriving;
     }
   }
 }
 
-void moveForward() {
-  int16_t ax, ay, az, gx, gy, gz;
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-  Serial.println(gz);
+/*int getDistance(){
+  long duration;
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  // Sets the trigPin on HIGH state for 10 micro seconds
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  // Reads the echoPin, returns the sound wave travel time in microseconds
+  duration = pulseIn(echoPin, HIGH);
+  // Calculating the distance
+  distance = duration * 0.034 / 2;
+  // Prints the distance on the Serial Monitor
+  return(distance);
+}*/
 
-  error = gz - setpoint;
-  pid.Compute();
-  int motorSpeed = constrain(int(output), -255, 255);
+float getAngle() {
+  // === Read accelerometer (on the MPU6050) data === //
+  readAcceleration();
+  // Calculating Roll and Pitch from the accelerometer data
+  accAngleX = (atan(AccY / sqrt(pow(AccX, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorX;  //AccErrorX is calculated in the calculateError() function
+  accAngleY = (atan(-1 * AccX / sqrt(pow(AccY, 2) + pow(AccZ, 2))) * 180 / PI) - AccErrorY;
 
-  // Adjust motor speeds based on the PID output
-  analogWrite(PWMA, motorSpeed);
-  analogWrite(PWMB, motorSpeed);
+  // === Read gyroscope (on the MPU6050) data === //
+  previousTime = currentTime;
+  currentTime = micros();
+  elapsedTime = (currentTime - previousTime) / 1000000;  // Divide by 1000 to get seconds
+  readGyro();
+  // Correct the outputs with the calculated error values
+  GyroX -= GyroErrorX;  //GyroErrorX is calculated in the calculateError() function
+  GyroY -= GyroErrorY;
+  GyroZ -= GyroErrorZ;
+  // Currently the raw values are in degrees per seconds, deg/s, so we need to multiply by sendonds (s) to get the angle in degrees
+  gyroAngleX += GyroX * elapsedTime;  // deg/s * s = deg
+  gyroAngleY += GyroY * elapsedTime;
+  yaw += GyroZ * elapsedTime;
+  //combine accelerometer- and gyro-estimated angle values. 0.96 and 0.04 values are determined through trial and error by other people
+  roll = 0.96 * gyroAngleX + 0.04 * accAngleX;
+  pitch = 0.96 * gyroAngleY + 0.04 * accAngleY;
+  angle = yaw;
+  return (angle);
+}
 
-  // Adjust motor directions based on the error
-   if (error < 0) {
-    analogWrite(PWMA, motorSpeed - 20);
+bool driving(bool iD) {                         //called by void loop(), which isDriving = true
+  int deltaAngle = round(targetAngle - angle);  //rounding is neccessary, since you never get exact values in reality
+  forward();
+  if (!iD) {
+    iD = true;
+    analogWrite(PWMA, equilibriumSpeed);
+    analogWrite(PWMB, equilibriumSpeed);
+  }
+  if (deltaAngle != 0) {
+    controlSpeed();
+    rightSpeedVal = maxSpeed;
+    analogWrite(PWMA, rightSpeedVal);
+    analogWrite(PWMB, leftSpeedVal);
+  }
+  return (iD);
+}
+
+void controlSpeed() {  //this function is called by driving ()
+  int deltaAngle = round(targetAngle - angle);
+  int targetGyroZ;
+
+  //setting up PID (Proportional Control only: P-Controller)
+  if (deltaAngle > 30) {
+    targetGyroZ = 60;
+  } else if (deltaAngle < -30) {
+    targetGyroZ = -60;
   } else {
-    analogWrite(PWMB, motorSpeed - 20);
+    targetGyroZ = kp * deltaAngle;
   }
 
+  if (round(targetGyroZ - GyroZ) == 0) {
+    ;
+  } else if (targetGyroZ > GyroZ) {
+    leftSpeedVal = changeSpeed(leftSpeedVal, -1);  //would increase GyroZ
+  } else {
+    leftSpeedVal = changeSpeed(leftSpeedVal, +1);
+  }
+}
+
+void rotate() {  //called by void loop(), which isDriving = false
+  int deltaAngle = round(targetAngle - angle);
+  int targetGyroZ;
+  if (abs(deltaAngle) <= 1) {
+    stopCar();
+    delay(500);
+    //iterCount++;
+    checkDistance = true;
+  } else {
+    if (angle > targetAngle) {  //turn left
+      left();
+    } else if (angle < targetAngle) {  //turn right
+      right();
+    }
+    //setting up PID (Just P-controller)
+    if (abs(deltaAngle) > 30) {
+      targetGyroZ = 60;
+    } else {
+      targetGyroZ = kp * abs(deltaAngle);  //Proportional Control
+    }
+
+    if (round(targetGyroZ - abs(GyroZ)) == 0) {
+      ;
+    } else if (targetGyroZ > abs(GyroZ)) {
+      leftSpeedVal = changeSpeed(leftSpeedVal, +1);  //would increase abs(GyroZ)
+    } else {
+      leftSpeedVal = changeSpeed(leftSpeedVal, -1);
+    }
+    rightSpeedVal = leftSpeedVal;
+    analogWrite(PWMA, rightSpeedVal);
+    analogWrite(PWMB, leftSpeedVal);
+  }
+  iD = false;
+}
+
+int changeSpeed(int motorSpeed, int increment) {
+  motorSpeed += increment;
+  if (motorSpeed > maxSpeed) {  //to prevent motorSpeed from exceeding 255, which is a problem when using analogWrite
+    motorSpeed = maxSpeed;
+  } else if (motorSpeed < minSpeed) {
+    motorSpeed = minSpeed;
+  }
+  return motorSpeed;
+}
+
+//Gyroscope Functions -----------------------------------------------------//
+void calculateError() {
+  //When this function is called, ensure the car is stationary. See Step 2 for more info
+  // Read accelerometer values 200 times
+  c = 0;
+  while (c < 200) {
+    readAcceleration();
+    // Sum all readings
+    AccErrorX += (atan((AccY) / sqrt(pow((AccX), 2) + pow((AccZ), 2))) * 180 / PI);
+    AccErrorY += (atan(-1 * (AccX) / sqrt(pow((AccY), 2) + pow((AccZ), 2))) * 180 / PI);
+    c++;
+  }
+  //Divide the sum by 200 to get the error value, since expected value of reading is zero
+  AccErrorX = AccErrorX / 200;
+  AccErrorY = AccErrorY / 200;
+  c = 0;
+
+  // Read gyro values 200 times
+  while (c < 200) {
+    readGyro();
+    // Sum all readings
+    GyroErrorX += GyroX;
+    GyroErrorY += GyroY;
+    GyroErrorZ += GyroZ;
+    c++;
+  }
+  //Divide the sum by 200 to get the error value
+  GyroErrorX = GyroErrorX / 200;
+  GyroErrorY = GyroErrorY / 200;
+  GyroErrorZ = GyroErrorZ / 200;
+  Serial.println("The the gryoscope setting in MPU6050 has been calibrated");
+}
+
+void readAcceleration() {
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B);  // Start with register 0x3B (ACCEL_XOUT_H)
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true);  // Read 6 registers total, each axis value is stored in 2 registers
+  //For a range of +-2g, we need to divide the raw values by 16384, according to the MPU6050 datasheet
+  AccX = (Wire.read() << 8 | Wire.read()) / 16384.0;  // X-axis value
+  AccY = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Y-axis value
+  AccZ = (Wire.read() << 8 | Wire.read()) / 16384.0;  // Z-axis value
+}
+
+void readGyro() {
+  Wire.beginTransmission(MPU);
+  Wire.write(0x43);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU, 6, true);
+  GyroX = (Wire.read() << 8 | Wire.read()) / 131.0;
+  GyroY = (Wire.read() << 8 | Wire.read()) / 131.0;
+  GyroZ = (Wire.read() << 8 | Wire.read()) / 131.0;
+}
+//-----------------------------------------------------//
+//Changes Direction of the Motor
+
+void stopCar() {
+  digitalWrite(STBY, LOW);
+  delay(500);
+}
+void forward() {  //drives the car forward, assuming leftSpeedVal and rightSpeedVal are set high enough
+  digitalWrite(STBY, HIGH);
   digitalWrite(AIN, HIGH);
   digitalWrite(B_IN, HIGH);
 }
-
-void spinClockwise() {
-  delay(100);
-  digitalWrite(STBY, HIGH);  // Keep the motors enabled
-
-  digitalWrite(AIN, HIGH);
-  digitalWrite(B_IN, LOW);
-  analogWrite(PWMA, 100);
-  analogWrite(PWMB, 100);
-
-  delay(700);
-
-  // Stop the motors
-  analogWrite(PWMA, 0);
-  analogWrite(PWMB, 0);
-}
-
-void spinCounterclockwise() {
-  delay(100);
-  digitalWrite(STBY, HIGH);  // Keep the motors enabled
-
+void left() {  //rotates the car left, assuming speed leftSpeedVal and rightSpeedVal are set high enough
+  digitalWrite(STBY, HIGH);
   digitalWrite(AIN, LOW);
   digitalWrite(B_IN, HIGH);
-  analogWrite(PWMA, 100);
-  analogWrite(PWMB, 100);
-
-  delay(700);
-
-  // Stop the motors
-  analogWrite(PWMA, 0);
-  analogWrite(PWMB, 0);
 }
-
-void calibrateMPU6050() {
-  Serial.println("Calibrating MPU6050... Please make sure the sensor is stationary.");
-
-  // Variables for calibration
-  const int numSamples = 1000;
-  long gyroZOffset = 0;
-
-  // Collect samples for calibration
-  for (int i = 0; i < numSamples; ++i) {
-    int16_t gx, gy, gz;
-    mpu.getRotation(&gx, &gy, &gz);
-    gyroZOffset += gz;
-    delay(5);  // Add a short delay between samples
-  }
-
-  // Calculate average value for calibration
-  gyroZOffset /= numSamples;
-
-  // Set the calibration offset
-  mpu.setZGyroOffset(gyroZOffset);
-
-  Serial.println("Calibration complete.");
+void right() {
+  digitalWrite(STBY, HIGH);
+  digitalWrite(AIN, HIGH);
+  digitalWrite(B_IN, LOW);
 }
