@@ -3,7 +3,8 @@
 #include <PID_v1.h>
 
 MPU6050 mpu;
-
+const int trig = 13;
+const int echo = 12;
 const int PWMA = 5;
 const int PWMB = 6;
 const int AIN = 7;
@@ -15,6 +16,8 @@ double ki = 1;
 double kd = 1;
 double error, integral, lastError, output;
 double setpoint = 1010;  // Use the observed bias as the initial setpoint
+long duration;
+float distance;
 
 // Create PID instance
 PID pid(&error, &output, &setpoint, kp, ki, kd, DIRECT);
@@ -26,6 +29,11 @@ const unsigned long moveDuration = 2400;  // Move forward for 2000 milliseconds
 const unsigned int numIterations = 4;  // Number of move-forward and turn iterations
 unsigned int iterationCount = 0;
 bool isMovingForward = true;  // State flag to indicate forward movement
+unsigned long interval1 = 100;  // Interval for Function 1 in milliseconds
+unsigned long interval2 = 100;  // Interval for Function 2 in milliseconds
+
+unsigned long previousMillis1 = 0;
+unsigned long previousMillis2 = 0;
 
 void setup() {
   Wire.begin();
@@ -50,15 +58,22 @@ void setup() {
   pinMode(B_IN, OUTPUT);
   pinMode(STBY, OUTPUT);
   digitalWrite(STBY, HIGH);
-
-
-  // Record the start time
-  startTime = millis();
 }
 
 void loop() {
-  // Get the elapsed time
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis1 >= interval1){
       moveForward();
+  }
+
+  if (currentMillis - previousMillis2 >= interval2){
+    distance = calculateDistance();
+    if (distance < 15) {
+      analogWrite (PWMA, 0);
+      analogWrite (PWMB, 0);
+      digitalWrite (STBY, LOW);
+    }
+  }
 
 }
 
@@ -125,4 +140,15 @@ void calibrateMPU6050() {
   mpu.setZGyroOffset(gyroZOffset);
 
   Serial.println("Calibration complete.");
+}
+
+float calculateDistance (){
+  digitalWrite (trig, LOW);
+  delay(2);
+  digitalWrite (trig, HIGH);
+  delay(10);
+  digitalWrite(trig, LOW);
+  duration = pulseIn (echo, HIGH);
+  distance = duration*0.034/2;
+  return distance;
 }
