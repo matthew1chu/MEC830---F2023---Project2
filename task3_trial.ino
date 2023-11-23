@@ -28,13 +28,6 @@ float distance;
 // Motor control variables
 bool isMovingForward = true;
 
-// Time variables
-unsigned long currentMillis;
-unsigned long previousMillis1 = 0;
-unsigned long previousMillis2 = 0;
-unsigned long interval1 = 100;  // Interval for PID control in milliseconds
-unsigned long interval2 = 100;  // Interval for distance checking in milliseconds
-
 void setup() {
   Wire.begin();
   Serial.begin(9600);
@@ -65,49 +58,43 @@ void setup() {
 }
 
 void loop() {
-  currentMillis = millis();
+  // Perform PID control
+  moveForward();
 
-  // Perform PID control at a fixed interval
-  if (currentMillis - previousMillis1 >= interval1) {
-    moveForward();
-    previousMillis1 = currentMillis;
-  }
-
-  // Check distance at a fixed interval
-  if (currentMillis - previousMillis2 >= interval2) {
-    distance = calculateDistance();
-    if (distance < 15) {
-      stopMotors();
-      isMovingForward = false;
-    } else {
-      isMovingForward = true;
-    }
-    previousMillis2 = currentMillis;
+  // Check distance
+  distance = calculateDistance();
+  if (distance < 15) {
+    stopMotors();
+    isMovingForward = false;
+  } else {
+    isMovingForward = true;
   }
 }
 
 void moveForward() {
-  int16_t ax, ay, az, gx, gy, gz;
-  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-  Serial.println(gz);
+  if (isMovingForward) {
+    int16_t ax, ay, az, gx, gy, gz;
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+    Serial.println(gz);
 
-  error = gz - setpoint;
-  pid.Compute();
-  int motorSpeed = constrain(int(output), -255, 255);
+    error = gz - setpoint;
+    pid.Compute();
+    int motorSpeed = constrain(int(output), -255, 255);
 
-  // Adjust motor speeds based on the PID output
-  analogWrite(PWMA, motorSpeed);
-  analogWrite(PWMB, motorSpeed);
+    // Adjust motor speeds based on the PID output
+    analogWrite(PWMA, motorSpeed);
+    analogWrite(PWMB, motorSpeed);
 
-  // Adjust motor directions based on the error
-  if (error < 0) {
-    analogWrite(PWMA, motorSpeed - 20);
-  } else {
-    analogWrite(PWMB, motorSpeed - 20);
+    // Adjust motor directions based on the error
+    if (error < 0) {
+      analogWrite(PWMA, motorSpeed - 20);
+    } else {
+      analogWrite(PWMB, motorSpeed - 20);
+    }
+
+    digitalWrite(AIN, HIGH);
+    digitalWrite(B_IN, HIGH);
   }
-
-  digitalWrite(AIN, HIGH);
-  digitalWrite(B_IN, HIGH);
 }
 
 void stopMotors() {
