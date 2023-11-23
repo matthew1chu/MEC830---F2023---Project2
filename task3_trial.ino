@@ -26,14 +26,14 @@ long duration;
 float distance;
 
 // Motor control variables
-bool isMovingForward = false;
+bool isMovingForward = true;
 
 // Time variables
-unsigned long startTime;
-unsigned long elapsedTime;
-const unsigned long moveDuration = 2400;  // Move forward for 2400 milliseconds
-unsigned long interval1 = 100;  // Interval for Function 1 in milliseconds
+unsigned long currentMillis;
 unsigned long previousMillis1 = 0;
+unsigned long previousMillis2 = 0;
+unsigned long interval1 = 100;  // Interval for PID control in milliseconds
+unsigned long interval2 = 100;  // Interval for distance checking in milliseconds
 
 void setup() {
   Wire.begin();
@@ -65,12 +65,16 @@ void setup() {
 }
 
 void loop() {
-  unsigned long currentMillis = millis();
-  if (!isMovingForward) {
+  currentMillis = millis();
+
+  // Perform PID control at a fixed interval
+  if (currentMillis - previousMillis1 >= interval1) {
     moveForward();
+    previousMillis1 = currentMillis;
   }
 
-  if (currentMillis - previousMillis1 >= interval1) {
+  // Check distance at a fixed interval
+  if (currentMillis - previousMillis2 >= interval2) {
     distance = calculateDistance();
     if (distance < 15) {
       stopMotors();
@@ -78,7 +82,7 @@ void loop() {
     } else {
       isMovingForward = true;
     }
-    previousMillis1 = currentMillis;
+    previousMillis2 = currentMillis;
   }
 }
 
