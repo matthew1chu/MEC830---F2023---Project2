@@ -10,30 +10,30 @@ const int PWMB = 6;
 const int AIN = 7;
 const int B_IN = 8;
 const int STBY = 3;
+
 // Define PID parameters
 double kp = 2;
 double ki = 1;
 double kd = 1;
 double error, integral, lastError, output;
 double setpoint = 1010;  // Use the observed bias as the initial setpoint
-long duration;
-float distance;
 
 // Create PID instance
 PID pid(&error, &output, &setpoint, kp, ki, kd, DIRECT);
 
+// Ultrasonic sensor variables
+long duration;
+float distance;
+
+// Motor control variables
+bool isMovingForward = false;
+
 // Time variables
 unsigned long startTime;
 unsigned long elapsedTime;
-const unsigned long moveDuration = 2400;  // Move forward for 2000 milliseconds
-const unsigned int numIterations = 4;  // Number of move-forward and turn iterations
-unsigned int iterationCount = 0;
-bool isMovingForward = true;  // State flag to indicate forward movement
+const unsigned long moveDuration = 2400;  // Move forward for 2400 milliseconds
 unsigned long interval1 = 100;  // Interval for Function 1 in milliseconds
-unsigned long interval2 = 100;  // Interval for Function 2 in milliseconds
-
 unsigned long previousMillis1 = 0;
-unsigned long previousMillis2 = 0;
 
 void setup() {
   Wire.begin();
@@ -52,6 +52,10 @@ void setup() {
   pid.SetSampleTime(1);
 
   Serial.println("MPU6050 initialized");
+
+  pinMode(trig, OUTPUT);
+  pinMode(echo, INPUT);
+
   pinMode(PWMA, OUTPUT);
   pinMode(PWMB, OUTPUT);
   pinMode(AIN, OUTPUT);
@@ -62,19 +66,20 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis1 >= interval1){
-      moveForward();
+  if (!isMovingForward) {
+    moveForward();
   }
 
-  if (currentMillis - previousMillis2 >= interval2){
+  if (currentMillis - previousMillis1 >= interval1) {
     distance = calculateDistance();
     if (distance < 15) {
-      analogWrite (PWMA, 0);
-      analogWrite (PWMB, 0);
-      digitalWrite (STBY, LOW);
+      stopMotors();
+      isMovingForward = false;
+    } else {
+      isMovingForward = true;
     }
+    previousMillis1 = currentMillis;
   }
-
 }
 
 void moveForward() {
@@ -101,22 +106,22 @@ void moveForward() {
   digitalWrite(B_IN, HIGH);
 }
 
-void turn90Degrees() {
-  delay (100);
-  digitalWrite(STBY, HIGH);  // Keep the motors enabled
-
-  digitalWrite(AIN, LOW);
-  digitalWrite(B_IN, HIGH);
-  analogWrite(PWMA, 100);
-  analogWrite(PWMB, 100);
-
-  delay(850);
-
-  // Stop the motors
+void stopMotors() {
   analogWrite(PWMA, 0);
   analogWrite(PWMB, 0);
+  digitalWrite(STBY, LOW);
 }
 
+float calculateDistance() {
+  digitalWrite(trig, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+  duration = pulseIn(echo, HIGH);
+  distance = duration * 0.034 / 2;
+  return distance;
+}
 
 void calibrateMPU6050() {
   Serial.println("Calibrating MPU6050... Please make sure the sensor is stationary.");
@@ -140,15 +145,4 @@ void calibrateMPU6050() {
   mpu.setZGyroOffset(gyroZOffset);
 
   Serial.println("Calibration complete.");
-}
-
-float calculateDistance (){
-  digitalWrite (trig, LOW);
-  delay(2);
-  digitalWrite (trig, HIGH);
-  delay(10);
-  digitalWrite(trig, LOW);
-  duration = pulseIn (echo, HIGH);
-  distance = duration*0.034/2;
-  return distance;
 }
